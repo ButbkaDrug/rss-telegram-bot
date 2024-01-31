@@ -1,6 +1,6 @@
 # FeedBot
 
-![FeedBot Logo](link/to/your/logo.png)
+![FeedBot Logo](https://butbkadrug.github.io/rss-feed-reader-bot-256.jpeg)
 
 ## Overview
 
