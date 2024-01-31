@@ -22,17 +22,17 @@ type Storage interface {
 
 // Core of the application. Ties all the components together
 type Bot struct {
-    // Telegram bot API key. In case we would need it for some reason
-	key         string
-    // Telegram bot API client
-	api         *tgbotapi.BotAPI
-    // Logger for logging what's going on
-	logger      *slog.Logger
-    // Storage interface for saving users data
-	store       Storage
-    // RSS parser for parsing feeds. Generic parser by default
-	parser      *gofeed.Parser
-    // List of active users
+	// Telegram bot API key. In case we would need it for some reason
+	key string
+	// Telegram bot API client
+	api *tgbotapi.BotAPI
+	// Logger for logging what's going on
+	logger *slog.Logger
+	// Storage interface for saving users data
+	store Storage
+	// RSS parser for parsing feeds. Generic parser by default
+	parser *gofeed.Parser
+	// List of active users
 	activeUsers models.Users
 }
 
@@ -66,10 +66,10 @@ func (b *Bot) Serve() {
 
 	updates := b.api.GetUpdatesChan(u)
 
-    // Load users from the storage before starting the main loop
+	// Load users from the storage before starting the main loop
 	b.LoadUsers()
 
-    b.logger.Info("starting fetching updates")
+	b.logger.Info("starting fetching updates")
 
 	for update := range updates {
 		b.updateHandler(update)
@@ -100,11 +100,11 @@ func (b *Bot) LoadUsers() {
 		return
 	}
 
-    for _, user := range b.activeUsers {
-        b.fetchUpdates(user)
-    }
+	for _, user := range b.activeUsers {
+		b.fetchUpdates(user)
+	}
 
-    b.logger.Info("loaded users", "count", len(b.activeUsers))
+	b.logger.Info("loaded users", "count", len(b.activeUsers))
 
 }
 
@@ -127,7 +127,7 @@ func (b *Bot) saveUsers() {
 
 // Creates a new user and adds to a userlist
 func (b *Bot) newUser(id int64) *models.User {
-    b.logger.Info("creating new user", "id", id)
+	b.logger.Info("creating new user", "id", id)
 
 	u := models.NewUser(id)
 	b.activeUsers[id] = u
@@ -156,13 +156,12 @@ func (b *Bot) SendTextMessage(id int64, s string) {
 }
 
 // Helper function to send an error message to the user
-//TODO: check if I even end up using this function
+// TODO: check if I even end up using this function
 func (b *Bot) SendErrorMessage(id int64, args ...interface{}) {
 	b.logger.Error("error accured", args...)
 
 	b.SendTextMessage(id, "I'm sorry, something went wrong and we can't procces your request for now. Please, try again later. If problem persists, contact bot administration.")
 }
-
 
 // Starts fetching feeds updates for the user
 func (b *Bot) fetchUpdates(user *models.User) {
@@ -206,13 +205,14 @@ func (b *Bot) CheckLink(user *models.User, link *models.Link) {
 }
 
 // Fetching feed implementation
-//TODO: apply Uwork formatter only when updates come from upwork
+// TODO: apply Uwork formatter only when updates come from upwork
 func (b *Bot) fetchLink(user *models.User, link *models.Link) {
 	for _, link := range user.Feed {
 		feed, err := b.parser.ParseURL(link.URL)
 
 		if err != nil {
-			errMsg := `failed to check for an update for the url + ` + link.URL
+			b.logger.Error("failed to parse url", "err", err)
+			errMsg := "Something wend wrong with a rss service:\n" + err.Error()
 			b.SendTextMessage(user.ID, errMsg)
 			return
 		}
@@ -224,7 +224,7 @@ func (b *Bot) fetchLink(user *models.User, link *models.Link) {
 
 			user.Store[item.GUID] = struct{}{}
 
-			msg := b.UpworkToTelegramFormatter(item)
+			msg := b.FormatItemForTelegram(item)
 
 			m := tgbotapi.NewMessage(user.ID, msg)
 			m.DisableWebPagePreview = true
@@ -244,8 +244,10 @@ func (b *Bot) fetchLink(user *models.User, link *models.Link) {
 // Platform specific formatter for Upwork RSS feed
 // It will get rid of all the HTML tags
 // And should cleanup the text a bit
-func (b *Bot) UpworkToTelegramFormatter(item *gofeed.Item) string {
-	sanitized := strings.ReplaceAll(item.Description, "<br />", "\n")
+func (b *Bot) FormatItemForTelegram(item *gofeed.Item) string {
+    var title string
+
+	sanitized := strings.ReplaceAll(item.Content, "<br />", "\n")
 	sanitized = strings.ReplaceAll(sanitized, "    ", "")
 	sanitized = strings.ReplaceAll(sanitized, "&quot;", "\"")
 	sanitized = strings.ReplaceAll(sanitized, "&rsquo;", "'")
@@ -253,7 +255,10 @@ func (b *Bot) UpworkToTelegramFormatter(item *gofeed.Item) string {
 
 	idx := strings.LastIndex(item.Title, " - ")
 
-	title := item.Title[:idx]
+    if idx > 1 {
+        title = item.Title[:idx]
+    }
+
 	title = fmt.Sprintf("<b><u>%s</u></b>", title)
 
 	msg := fmt.Sprintf("%s\n\n%s\n%s",

@@ -31,8 +31,53 @@ func (b *Bot) updateHandler(update tgbotapi.Update) {
             b.UsageCommandHandler(update)
         case "save":
             b.SaveUserDataHandler(update)
+        case "set":
+            b.SetCommandHandler(update)
 		}
 	}
+
+}
+
+// Sets new timeout on existing feed
+func(b *Bot) SetCommandHandler(update tgbotapi.Update){
+    id := update.Message.Chat.ID
+    args := strings.Split(update.Message.CommandArguments(), " ")
+
+    if len(args) < 2 {
+        b.SendTextMessage(id, `
+Please, provide 2 intagers:
+feedID - to know which feed you want to edit, N for update timer in minues.
+In this example we will set feed 0 to update every 10 minutes
+
+EXAMPLE:
+/set 0 10
+`)
+
+        return
+    }
+
+    feedID, feedErr := strconv.Atoi(args[0])
+    timeout, timeErr := strconv.Atoi(args[1])
+
+    if feedErr != nil && timeErr != nil {
+        b.SendTextMessage(id, "FeedID and Timer should be a number")
+    }
+
+    user := b.GetUser(id)
+
+    if feedID >= len(user.Feed) || feedID < 0 {
+        b.SendTextMessage(id, "there is no feed with id: "+ args[0])
+        return
+    }
+
+    if timeout < 1 {
+        b.SendTextMessage(id, "timeout should be at least a minute")
+        return
+    }
+
+    user.Feed[feedID].SetTimeout(time.Duration(timeout)*time.Minute)
+
+    b.SendTextMessage(id, "Your feed has been successfully set!")
 }
 
 // Saves user data using. You shoul'd have to use it manually, but you can
