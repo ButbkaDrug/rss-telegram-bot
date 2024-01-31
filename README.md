@@ -13,4 +13,4 @@ FeedBot is a sophisticated Telegram bot developed in Golang, designed to revolut
 - **Efficient and Reliable:** Built with Golang for maximum efficiency and reliability.(Actually, only because I love using GO)
 
 1. Clone repository
-2. From repository folder build/run main.go file. Provide your bot tokey ether with -key flag or create .evn file in project root and add "BOT_API_KEY=yourbotapikeyformbotfather" line
+2. From repository folder build/run main.go file. Provide your bot tokey ether with -key flag or create .evn file in project root and add "BOT_API_KEY=yourbotapikeyformbotfather". Replase my gibberish with your actual token.

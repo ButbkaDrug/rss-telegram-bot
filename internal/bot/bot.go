@@ -69,6 +69,8 @@ func (b *Bot) Serve() {
     // Load users from the storage before starting the main loop
 	b.LoadUsers()
 
+    b.logger.Info("starting fetching updates")
+
 	for update := range updates {
 		b.updateHandler(update)
 	}
@@ -97,6 +99,13 @@ func (b *Bot) LoadUsers() {
 		b.logger.Error("failed to unmarshal users", "err", err)
 		return
 	}
+
+    for _, user := range b.activeUsers {
+        b.fetchUpdates(user)
+    }
+
+    b.logger.Info("loaded users", "count", len(b.activeUsers))
+
 }
 
 // Marshals users data ad saves to the storage
@@ -118,6 +127,7 @@ func (b *Bot) saveUsers() {
 
 // Creates a new user and adds to a userlist
 func (b *Bot) newUser(id int64) *models.User {
+    b.logger.Info("creating new user", "id", id)
 
 	u := models.NewUser(id)
 	b.activeUsers[id] = u
