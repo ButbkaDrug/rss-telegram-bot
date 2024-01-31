@@ -22,7 +22,7 @@ func main () {
 
     flag.StringVar(
         &bot_api_key,
-        "api-key",
+        "key",
         os.Getenv("BOT_API_KEY"),
         "Provide bot api key. If you don't have one prompt @botfather chatbot",
     )
