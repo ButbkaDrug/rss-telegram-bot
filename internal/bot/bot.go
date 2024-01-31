@@ -15,23 +15,28 @@ import (
 	"github.com/mmcdole/gofeed"
 )
 
-//TODO: Persistant storage. So that i don't send messages in case of restart.
-//TODO: user.feed should be a map?
-
 type Storage interface {
 	Read() ([]byte, error)
 	Write([]byte) error
 }
 
+// Core of the application. Ties all the components together
 type Bot struct {
+    // Telegram bot API key. In case we would need it for some reason
 	key         string
+    // Telegram bot API client
 	api         *tgbotapi.BotAPI
+    // Logger for logging what's going on
 	logger      *slog.Logger
+    // Storage interface for saving users data
 	store       Storage
+    // RSS parser for parsing feeds. Generic parser by default
 	parser      *gofeed.Parser
+    // List of active users
 	activeUsers models.Users
 }
 
+// Creates a new bot instance with given API key and logger
 func NewBot(key string, l *slog.Logger) (*Bot, error) {
 	api, err := tgbotapi.NewBotAPI(key)
 
@@ -52,6 +57,7 @@ func NewBot(key string, l *slog.Logger) (*Bot, error) {
 	}, nil
 }
 
+// Starts the main loop and handles all the updates from the Telegram API
 func (b *Bot) Serve() {
 
 	u := tgbotapi.NewUpdate(0)
@@ -60,6 +66,7 @@ func (b *Bot) Serve() {
 
 	updates := b.api.GetUpdatesChan(u)
 
+    // Load users from the storage before starting the main loop
 	b.LoadUsers()
 
 	for update := range updates {
@@ -67,6 +74,8 @@ func (b *Bot) Serve() {
 	}
 }
 
+// Helper function that prints out the memory usage
+// TODO: remove this function
 func MemUsage() string {
 	var m runtime.MemStats
 	runtime.ReadMemStats(&m)
@@ -78,10 +87,10 @@ func MemUsage() string {
 		fmt.Sprintf("\tNumGC = %v\n", m.NumGC)
 }
 
+// Loads users from the storage and unmarshals them into the activeUsers list
 func (b *Bot) LoadUsers() {
 
 	data, err := b.store.Read()
-
 	err = json.Unmarshal(data, &b.activeUsers)
 
 	if err != nil {
@@ -90,6 +99,7 @@ func (b *Bot) LoadUsers() {
 	}
 }
 
+// Marshals users data ad saves to the storage
 func (b *Bot) saveUsers() {
 	data, err := json.Marshal(b.activeUsers)
 
@@ -126,6 +136,7 @@ func (b *Bot) GetUser(id int64) *models.User {
 	return usr
 }
 
+// Helper function to send a text message to the user
 func (b *Bot) SendTextMessage(id int64, s string) {
 
 	msg := tgbotapi.NewMessage(id, s)
@@ -134,12 +145,16 @@ func (b *Bot) SendTextMessage(id int64, s string) {
 
 }
 
+// Helper function to send an error message to the user
+//TODO: check if I even end up using this function
 func (b *Bot) SendErrorMessage(id int64, args ...interface{}) {
 	b.logger.Error("error accured", args...)
 
 	b.SendTextMessage(id, "I'm sorry, something went wrong and we can't procces your request for now. Please, try again later. If problem persists, contact bot administration.")
 }
 
+
+// Starts fetching feeds updates for the user
 func (b *Bot) fetchUpdates(user *models.User) {
 	b.logger.Info("starting fetching for", "user", user.ID)
 
@@ -159,9 +174,9 @@ func (b *Bot) fetchUpdates(user *models.User) {
 	}
 }
 
+// Checks the timeout and fetches updates for the user
+// Also saves the user data to the storage after fetching
 func (b *Bot) CheckLink(user *models.User, link *models.Link) {
-	b.logger.Info("CheckLink initialized", "url", link.URL)
-
 	ticker := time.NewTicker(link.Timeout)
 	done := make(chan struct{})
 
@@ -180,8 +195,9 @@ func (b *Bot) CheckLink(user *models.User, link *models.Link) {
 	}
 }
 
+// Fetching feed implementation
+//TODO: apply Uwork formatter only when updates come from upwork
 func (b *Bot) fetchLink(user *models.User, link *models.Link) {
-
 	for _, link := range user.Feed {
 		feed, err := b.parser.ParseURL(link.URL)
 
@@ -215,6 +231,9 @@ func (b *Bot) fetchLink(user *models.User, link *models.Link) {
 
 }
 
+// Platform specific formatter for Upwork RSS feed
+// It will get rid of all the HTML tags
+// And should cleanup the text a bit
 func (b *Bot) UpworkToTelegramFormatter(item *gofeed.Item) string {
 	sanitized := strings.ReplaceAll(item.Description, "<br />", "\n")
 	sanitized = strings.ReplaceAll(sanitized, "    ", "")
