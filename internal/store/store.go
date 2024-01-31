@@ -1,23 +1,39 @@
 package store
 
-import "github.com/mmcdole/gofeed"
+import (
+	"os"
+)
 
-type Simplestore struct {
-    store map[string]*gofeed.Item
+// Super simple file store.
+type Simplestore struct{
+    // Who knows why I put it there? But let is be :)
+    os.File
+    // Allows to define storage location
+	Filepath string
 }
 
-func NewSimplestore()Simplestore {
-    return Simplestore{
-        store: make(map[string]*gofeed.Item),
+// Creates a new instance of a simple store with default configuration
+func NewSimplestore() Simplestore {
+	return Simplestore{
+        Filepath: ".users/data",
     }
 }
 
-func(s Simplestore) Save(i *gofeed.Item) {
-    s.store[i.GUID] = i
+// Creates new instance of a simple store with a specific path.
+func NewSimplestoreWithFilepath(p string) Simplestore {
+    s := Simplestore{}
+    s.Filepath = p
+
+    return s
 }
 
-func(s Simplestore) Contains(i *gofeed.Item) bool {
-    _, ok := s.store[i.GUID]
+// Read from the file
+func (s Simplestore) Read() ([]byte, error) {
+	return os.ReadFile(s.Filepath)
 
-    return ok
+}
+
+// Writes to a file
+func (s Simplestore) Write(data []byte) error {
+	return os.WriteFile(s.Filepath, data, 0644)
 }

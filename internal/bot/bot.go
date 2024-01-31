@@ -2,37 +2,41 @@ package bot
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
-	"log"
 	"log/slog"
-	"os"
-	"path"
-	"path/filepath"
 	"runtime"
-	"strconv"
 	"strings"
 	"time"
 
-	"telebot/internal/user"
+	"telebot/internal/models"
+	"telebot/internal/store"
 
-	tblib "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
+	"github.com/mmcdole/gofeed"
 )
 
 //TODO: Persistant storage. So that i don't send messages in case of restart.
-//TODO: Also, save users data, so that after restart I don't have to add all the links back
 //TODO: user.feed should be a map?
+
+type Storage interface {
+	Read() ([]byte, error)
+	Write([]byte) error
+}
 
 type Bot struct {
 	key         string
-	api         *tblib.BotAPI
+	api         *tgbotapi.BotAPI
 	logger      *slog.Logger
-	activeUsers map[int64]*user.User
+	store       Storage
+	parser      *gofeed.Parser
+	activeUsers models.Users
 }
 
 func NewBot(key string, l *slog.Logger) (*Bot, error) {
-	api, err := tblib.NewBotAPI(key)
+	api, err := tgbotapi.NewBotAPI(key)
+
+	s := store.NewSimplestore()
+	p := gofeed.NewParser()
 
 	if err != nil {
 		return nil, fmt.Errorf("Cannot initialize bot: %w", err)
@@ -42,19 +46,21 @@ func NewBot(key string, l *slog.Logger) (*Bot, error) {
 		key:         key,
 		api:         api,
 		logger:      l,
-		activeUsers: make(map[int64]*user.User),
+		store:       s,
+		parser:      p,
+		activeUsers: make(models.Users),
 	}, nil
 }
 
 func (b *Bot) Serve() {
 
-	u := tblib.NewUpdate(0)
+	u := tgbotapi.NewUpdate(0)
 
 	u.Timeout = 60
 
 	updates := b.api.GetUpdatesChan(u)
 
-    b.LoadUser()
+	b.LoadUsers()
 
 	for update := range updates {
 		b.updateHandler(update)
@@ -72,289 +78,52 @@ func MemUsage() string {
 		fmt.Sprintf("\tNumGC = %v\n", m.NumGC)
 }
 
-func (b *Bot) updateHandler(update tgbotapi.Update) {
-    log.Printf("NEW UPDATE:%+v\n", update)
+func (b *Bot) LoadUsers() {
 
-	m := update.Message
+	data, err := b.store.Read()
 
-	if m != nil && m.IsCommand() {
-		switch m.Command() {
-		case "start":
-			b.StartCommandHandler(update)
-		case "users":
-			b.UsersCommandHandler(update)
-		case "links":
-			b.LinksCommandHandler(update)
-		case "add":
-			b.AddLinkCommandHandler(update)
-		case "remove":
-			b.RemoveLinkCommandHandler(update)
-		case "usage":
-            b.UsageCommandHandler(update)
-        case "save":
-            b.SaveUserDataHandler(update)
-		}
+	err = json.Unmarshal(data, &b.activeUsers)
+
+	if err != nil {
+		b.logger.Error("failed to unmarshal users", "err", err)
+		return
 	}
 }
 
-func(b *Bot) SaveUserDataHandler(update tgbotapi.Update) {
-    type temp struct{
-            // We will store by user id
-            ID int64
-            // We will map the feed url and fetching duration. We can secrifice the rest
-            Links map[string]time.Duration
-    }
+func (b *Bot) saveUsers() {
+	data, err := json.Marshal(b.activeUsers)
 
-    for _, user := range b.activeUsers {
-        var links = make(map[string]time.Duration)
+	if err != nil {
+		b.logger.Error("failed to marshal users data", "err", err.Error())
+		return
+	}
 
-        for _, link := range user.Feed {
-            links[link.URL] = link.Timer
-        }
+	err = b.store.Write(data)
 
-        //struct will temporarly store the most nessesery data.
-        s := temp {
-            ID: user.ID,
-            Links: links,
-        }
-
-        err := StupidStore(strconv.FormatInt(user.ID, 10), s)
-
-        if err != nil {
-            b.logger.Error("faild to save users data", "err", err)
-        }
-    }
-}
-
-func(b *Bot) LoadUser(){
-    type temp struct{
-            // We will store by user id
-            ID int64
-            // We will map the feed url and fetching duration. We can secrifice the rest
-            Links map[string]time.Duration
-    }
-
-    var users []temp
-
-    entries, err := os.ReadDir(".users")
-
-    if err != nil {
-        b.logger.Error("failed to load users", "err", err)
-    }
-
-    for _, entry := range entries {
-        if entry.IsDir(){
-            continue
-        }
-
-        file := path.Join(".users", entry.Name())
-        var user temp
-
-        err := StupidRestore(file, &user)
-
-        if err != nil{
-            b.logger.Error("failed to restore user", "err", err)
-        }
-
-
-        users = append(users, user)
-
-    }
-
-
-    for _, entry := range users {
-
-        user := b.GetUser(entry.ID)
-
-
-        for link, duration := range entry.Links {
-            user.AddLinkWithTimer(link, duration)
-        }
-
-        b.logger.Info("users loaded", "id", user.ID)
-
-        b.fetchUpdates(user)
-    }
-
-
-
-}
-
-func StupidStore(filename string, data any) error {
-    //TODO: Figure out the proper location for the files and not to store them
-    // wherever script runs
-
-    file := filepath.Join(".users", filename)
-    f, err := os.Create(file)
-
-    if err != nil {
-        return err
-    }
-
-    err = json.NewEncoder(f).Encode(data)
-
-    if err != nil {
-        return err
-    }
-
-    return nil
-}
-
-func StupidRestore(filename string, dest any) error {
-
-    f, err := os.Open(filename)
-
-    if err != nil {
-        return err
-    }
-
-    err = json.NewDecoder(f).Decode(dest)
-
-    if err != nil {
-        return err
-    }
-
-    return nil
-}
-
-func (b *Bot) UsageCommandHandler(update tgbotapi.Update) {
-	msg := MemUsage()
-
-	b.SendTextMessage(update.FromChat().ID, msg)
+	if err != nil {
+		b.logger.Error("failed to write user data", "err", err.Error())
+		return
+	}
 }
 
 // Creates a new user and adds to a userlist
-func(b *Bot) newUser(id int64) *user.User {
+func (b *Bot) newUser(id int64) *models.User {
 
-    u := user.NewUser(id)
-    b.activeUsers[id] = u
+	u := models.NewUser(id)
+	b.activeUsers[id] = u
 
-    return u
+	return u
 }
 
 // Get New user from the users list or creates a new one if user do not exist
-func (b *Bot) GetUser(id int64) *user.User {
+func (b *Bot) GetUser(id int64) *models.User {
 	usr, ok := b.activeUsers[id]
 
 	if !ok {
-        usr = b.newUser(id)
+		usr = b.newUser(id)
 	}
 
 	return usr
-}
-
-func (b *Bot) RemoveLinkCommandHandler(update tgbotapi.Update) {
-	id, err := strconv.Atoi(update.Message.CommandArguments())
-
-	if err != nil {
-		b.SendTextMessage(update.FromChat().ID, "# URL should be a nubmer. user /links to find out")
-		return
-	}
-
-	user, ok := b.activeUsers[update.FromChat().ID]
-
-	if !ok {
-		b.SendTextMessage(update.FromChat().ID, "You're not in the userlist. Please, run a /start command")
-		return
-	}
-
-	user.RemoveLink(id)
-
-	b.SendTextMessage(update.FromChat().ID, "Link successfully removed")
-
-	b.LinksCommandHandler(update)
-    b.SaveUserDataHandler(update)
-}
-
-func (b *Bot) AddLinkCommandHandler(update tgbotapi.Update) {
-    b.logger.Info("adding new link")
-    id := update.FromChat().ID
-	args := strings.Split(update.Message.CommandArguments(), " ")
-
-	if len(args) < 1 {
-        msg := "Seems like you forgot about to past a like. Please, try again"
-		b.SendTextMessage(id, msg)
-		return
-	}
-
-	link := args[0]
-
-    user := b.GetUser(id)
-
-	if len(args) == 2 {
-		timer, err := strconv.Atoi(args[1])
-
-		if err != nil {
-            msg := "timer(as second argument) should be a number"
-			b.SendTextMessage(id, msg)
-			return
-		}
-		user.AddLinkWithTimer(link, time.Duration(timer)*time.Minute)
-	} else {
-		user.AddLink(link)
-	}
-
-	b.SendTextMessage(id, "Link, successfully added! You links are: ")
-	b.LinksCommandHandler(update)
-
-	b.fetchUpdates(user)
-    b.SaveUserDataHandler(update)
-}
-
-func (b *Bot) LinksCommandHandler(update tgbotapi.Update) {
-
-	var text string
-	user, ok := b.activeUsers[update.FromChat().ID]
-
-	if !ok {
-		err := errors.New("User is not in a userlist")
-		b.SendErrorMessage(update.FromChat().ID, err)
-		return
-	}
-
-	for _, link := range user.Feed {
-		if link == nil {
-			continue
-		}
-		text += fmt.Sprintf("```%+v```\n", link)
-	}
-
-	if text == "" {
-		text = "You havan't add any links yet"
-	}
-
-	b.SendTextMessage(update.FromChat().ID, text)
-}
-
-func (b *Bot) UsersCommandHandler(update tgbotapi.Update) {
-
-	var text string
-
-	for _, user := range b.activeUsers {
-		text += fmt.Sprintf("%d: %v", user.ID, user.Feed)
-	}
-
-	if text == "" {
-		text = "No active users yet"
-	}
-
-	b.SendTextMessage(update.FromChat().ID, text)
-
-}
-
-func (b *Bot) StartCommandHandler(update tgbotapi.Update) {
-	var id = update.FromChat().ID
-
-	if _, ok := b.activeUsers[id]; !ok {
-        b.newUser(id)
-        msg := "You've been added to a list of active users. Add RSS or Atom URLS to start receiving updates"
-        b.SendTextMessage(id, msg)
-        return
-	}
-
-    msg := "already on the list"
-    b.SendTextMessage(id, msg)
-    return
 }
 
 func (b *Bot) SendTextMessage(id int64, s string) {
@@ -371,8 +140,8 @@ func (b *Bot) SendErrorMessage(id int64, args ...interface{}) {
 	b.SendTextMessage(id, "I'm sorry, something went wrong and we can't procces your request for now. Please, try again later. If problem persists, contact bot administration.")
 }
 
-func (b *Bot) fetchUpdates(user *user.User) {
-	b.logger.Info("Starting fetching for", "user", user)
+func (b *Bot) fetchUpdates(user *models.User) {
+	b.logger.Info("starting fetching for", "user", user.ID)
 
 	for i, link := range user.Feed {
 		if link == nil {
@@ -390,70 +159,79 @@ func (b *Bot) fetchUpdates(user *user.User) {
 	}
 }
 
-func (b *Bot) CheckLink(user *user.User, link *user.Link) {
+func (b *Bot) CheckLink(user *models.User, link *models.Link) {
 	b.logger.Info("CheckLink initialized", "url", link.URL)
 
-	ticker := time.NewTicker(link.Timer)
+	ticker := time.NewTicker(link.Timeout)
 	done := make(chan struct{})
 
-    b.fetchLink(user, link)
+	b.fetchLink(user, link)
 
 	for {
 
 		select {
 		case <-done:
 			return
-        case <-ticker.C:
-            b.fetchLink(user, link)
+		case <-ticker.C:
+			b.fetchLink(user, link)
+			b.saveUsers()
 		}
 
 	}
 }
 
-func (b *Bot) fetchLink(user *user.User, link *user.Link) {
-    var msg string
+func (b *Bot) fetchLink(user *models.User, link *models.Link) {
 
-    items, err := link.Fetch()
-    b.logger.Info("Items found", "count", len(items))
+	for _, link := range user.Feed {
+		feed, err := b.parser.ParseURL(link.URL)
 
-    if err != nil {
-        errMsg := `failed to check for an update for the url + ` + link.URL
-        b.SendTextMessage(user.ID, errMsg)
-        return
-    }
+		if err != nil {
+			errMsg := `failed to check for an update for the url + ` + link.URL
+			b.SendTextMessage(user.ID, errMsg)
+			return
+		}
 
-    for _, item := range items {
+		for _, item := range feed.Items {
+			if _, ok := user.Store[item.GUID]; ok {
+				continue
+			}
 
+			user.Store[item.GUID] = struct{}{}
 
+			msg := b.UpworkToTelegramFormatter(item)
 
-        sanitized := strings.ReplaceAll(item.Description, "<br />", "\n")
-        sanitized = strings.ReplaceAll(sanitized, "    ", "")
+			m := tgbotapi.NewMessage(user.ID, msg)
+			m.DisableWebPagePreview = true
+			m.ParseMode = "HTML"
 
-        idx := strings.LastIndex(item.Title, " - ")
+			_, err := b.api.Send(m)
 
-        title := item.Title[:idx]
-        title = fmt.Sprintf("<b><u>%s</u></b>", title)
+			if err != nil {
+				b.logger.Error("failed to send update", "error", err.Error())
+			}
+		}
 
+	}
 
+}
 
+func (b *Bot) UpworkToTelegramFormatter(item *gofeed.Item) string {
+	sanitized := strings.ReplaceAll(item.Description, "<br />", "\n")
+	sanitized = strings.ReplaceAll(sanitized, "    ", "")
+	sanitized = strings.ReplaceAll(sanitized, "&quot;", "\"")
+	sanitized = strings.ReplaceAll(sanitized, "&rsquo;", "'")
+	sanitized = strings.ReplaceAll(sanitized, "&ndash;", "-")
 
-        msg = fmt.Sprintf("%s\n\n%s\n%s",
-            title,
-            sanitized,
-            item.Link,
-        )
+	idx := strings.LastIndex(item.Title, " - ")
 
+	title := item.Title[:idx]
+	title = fmt.Sprintf("<b><u>%s</u></b>", title)
 
-        m := tgbotapi.NewMessage(user.ID, msg)
-        m.DisableWebPagePreview = true
-        m.ParseMode = "HTML"
+	msg := fmt.Sprintf("%s\n\n%s\n%s",
+		title,
+		sanitized,
+		item.Link,
+	)
 
-        _, err := b.api.Send(m)
-
-        if err != nil {
-            b.logger.Error("failed to send update", "error", err.Error())
-        }
-
-    }
-
+	return msg
 }
