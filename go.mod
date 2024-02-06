@@ -1,4 +1,4 @@
-module telebot
+module github.com/butbkadrug/rss-telegram-bot
 
 go 1.21.1
 

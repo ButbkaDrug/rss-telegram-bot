@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"telebot/internal/bot"
+	"github.com/butbkadrug/rss-telegram-bot/internal/bot"
 	"time"
 
 	"github.com/joho/godotenv"

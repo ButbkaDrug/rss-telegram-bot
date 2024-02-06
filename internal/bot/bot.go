@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"telebot/internal/models"
-	"telebot/internal/store"
+	"github.com/butbkadrug/rss-telegram-bot/internal/models"
+	"github.com/butbkadrug/rss-telegram-bot/internal/store"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"github.com/mmcdole/gofeed"
