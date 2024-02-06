@@ -38,6 +38,7 @@ func (b *Bot) updateHandler(update tgbotapi.Update) {
 
 }
 
+
 // Sets new timeout on existing feed
 func(b *Bot) SetCommandHandler(update tgbotapi.Update){
     id := update.Message.Chat.ID

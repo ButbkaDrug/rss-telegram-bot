@@ -3,6 +3,7 @@ package bot
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"log/slog"
 	"runtime"
 	"strings"
@@ -63,6 +64,7 @@ func (b *Bot) Serve() {
 	u := tgbotapi.NewUpdate(0)
 
 	u.Timeout = 60
+    u.AllowedUpdates = []string{"message", "message_reaction"}
 
 	updates := b.api.GetUpdatesChan(u)
 
@@ -72,6 +74,7 @@ func (b *Bot) Serve() {
 	b.logger.Info("starting fetching updates")
 
 	for update := range updates {
+        log.Printf("%+v\n", update)
 		b.updateHandler(update)
 	}
 }
@@ -225,6 +228,7 @@ func (b *Bot) fetchLink(user *models.User, link *models.Link) {
 			user.Store[item.GUID] = struct{}{}
 
 			msg := b.FormatItemForTelegram(item)
+
 
 			m := tgbotapi.NewMessage(user.ID, msg)
 			m.DisableWebPagePreview = true
